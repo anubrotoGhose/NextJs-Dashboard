@@ -9,18 +9,27 @@ import {
 } from './definitions';
 import { formatCurrency } from './utils';
 
-const sql = neon(process.env.DATABASE_URL!, { ssl: 'require' });
+const sql = neon(process.env.DATABASE_URL!, {
+  fetchOptions: {
+    cache: 'no-store',
+    mode: 'cors', // Optional: Adjust as needed
+  },
+});
 
-export async function fetchRevenue() {
+export async function fetchRevenue(): Promise<Revenue[]> {
   try {
-    const data = await sql<Revenue[]>`SELECT * FROM revenue`;
-    
-    return data;
+    const data = await sql<Revenue[]>`SELECT month, revenue FROM revenue`;
+
+    return data.map((item) => ({
+      month: String(item.month), // Ensure string
+      revenue: Number(item.revenue), // Ensure number
+    }));
   } catch (error) {
     console.error('Database Error:', error);
     throw new Error('Failed to fetch revenue data.');
   }
 }
+
 
 export async function fetchLatestInvoices() {
   try {
@@ -147,8 +156,8 @@ export async function fetchFilteredCustomers(query: string) {
         customers.email,
         customers.image_url,
         COUNT(invoices.id) AS total_invoices,
-        SUM(CASE WHEN invoices.status = 'pending' THEN invoices.amount ELSE 0 END) AS total_pending,
-        SUM(CASE WHEN invoices.status = 'paid' THEN invoices.amount ELSE 0 END) AS total_paid
+        COALESCE(SUM(CASE WHEN invoices.status = 'pending' THEN invoices.amount ELSE 0 END), 0) AS total_pending,
+        COALESCE(SUM(CASE WHEN invoices.status = 'paid' THEN invoices.amount ELSE 0 END), 0) AS total_paid
       FROM customers
       LEFT JOIN invoices ON customers.id = invoices.customer_id
       WHERE
@@ -157,13 +166,17 @@ export async function fetchFilteredCustomers(query: string) {
       GROUP BY customers.id, customers.name, customers.email, customers.image_url
       ORDER BY customers.name ASC`;
 
-    return data.map((customer) => ({
-      ...customer,
-      total_pending: formatCurrency(customer.total_pending ?? 0),
-      total_paid: formatCurrency(customer.total_paid ?? 0),
-    }));
+    // Ensure total_pending and total_paid are correctly formatted as currency
+    return data.length > 0
+      ? data.map((customer) => ({
+          ...customer,
+          total_pending: formatCurrency(Number(customer.total_pending)),
+          total_paid: formatCurrency(Number(customer.total_paid)),
+        }))
+      : [];
   } catch (error) {
     console.error('Database Error:', error);
     throw new Error('Failed to fetch customer table.');
   }
 }
+
